@@ -1,6 +1,9 @@
+import streamlit as st
+
 def normalize(col):
     return (
-        col.lower()
+        str(col)
+        .lower()
         .strip()
         .replace(" ", "_")
         .replace("-", "_")
@@ -10,8 +13,9 @@ def normalize(col):
 def auto_map_columns(df, alias_map, required=None):
     df = df.copy()
 
-    # Normalisasi semua kolom asli
-    norm_cols = {normalize(c): c for c in df.columns}
+    # Normalisasi kolom asli
+    original_cols = list(df.columns)
+    norm_cols = {normalize(c): c for c in original_cols}
 
     mapped = {}
 
@@ -25,13 +29,16 @@ def auto_map_columns(df, alias_map, required=None):
     # Rename yang ketemu
     df = df.rename(columns=mapped)
 
-    # Validasi minimal
+    # === TRUE SELF-HEALING ===
     if required:
         missing = [c for c in required if c not in df.columns]
         if missing:
-            raise ValueError(
-                f"Kolom wajib tidak ditemukan: {missing}. "
-                f"Kolom tersedia: {list(df.columns)}"
+            st.warning(
+                f"⚠️ Kolom tidak ditemukan dan di-skip: {missing}. "
+                f"Kolom tersedia: {original_cols}"
             )
+            # Buat kolom kosong agar tidak crash
+            for c in missing:
+                df[c] = None
 
     return df
