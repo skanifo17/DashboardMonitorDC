@@ -1,37 +1,39 @@
 import pandas as pd
 import numpy as np
+from schema import auto_map_columns
 
-# =============================
+# =========================
 # TRANSAKSI
-# =============================
+# =========================
 def prepare_transaksi(df):
-    # Rename agar konsisten
-    df = df.rename(columns={
-        "Nama_Barang": "nama_barang",
-        "Jumlah_Karton": "karton"
-    })
 
-    df = df[
-        ["Tanggal", "SKU", "nama_barang", "Tipe", "karton", "Gudang"]
-    ]
+    alias = {
+        "tanggal": ["Tanggal", "Date"],
+        "sku": ["SKU"],
+        "nama_barang": ["Nama_Barang", "Nama Barang"],
+        "tipe": ["Tipe", "Type"],
+        "karton": ["Jumlah_Karton", "Jumlah Karton", "Karton"],
+        "gudang": ["Gudang", "Warehouse"]
+    }
 
-    # Tanggal aman
-    df["Tanggal"] = pd.to_datetime(
-        df["Tanggal"],
+    df = auto_map_columns(
+        df,
+        alias,
+        required=["tanggal", "nama_barang", "tipe", "karton", "gudang"]
+    )
+
+    df["tanggal"] = pd.to_datetime(
+        df["tanggal"],
         errors="coerce",
         dayfirst=True
     )
-    df = df.dropna(subset=["Tanggal"])
+    df = df.dropna(subset=["tanggal"])
 
-    # Karton numerik
     df["karton"] = pd.to_numeric(df["karton"], errors="coerce").fillna(0)
+    df["tipe"] = df["tipe"].astype(str).str.upper().str.strip()
 
-    # Normalisasi tipe
-    df["Tipe"] = df["Tipe"].astype(str).str.upper().str.strip()
-
-    # Qty logic
     df["qty"] = np.where(
-        df["Tipe"] == "OUTBOUND",
+        df["tipe"].str.contains("OUT"),
         -df["karton"],
         df["karton"]
     )
@@ -39,46 +41,61 @@ def prepare_transaksi(df):
     return df
 
 
-# =============================
-# INVENTORY POSITION
-# =============================
+# =========================
+# INVENTORY
+# =========================
 def inventory_position(df):
     stok = (
-        df.groupby(["nama_barang", "Gudang"], as_index=False)["qty"]
+        df.groupby(["nama_barang", "gudang"], as_index=False)["qty"]
         .sum()
         .rename(columns={"qty": "stok_karton"})
     )
 
-    outbound = df[df["Tipe"] == "OUTBOUND"]
+    outbound = df[df["tipe"].str.contains("OUT")]
 
-    avg_out = (
+    avg = (
         outbound.groupby("nama_barang", as_index=False)["karton"]
         .mean()
         .rename(columns={"karton": "avg_daily_out"})
     )
 
-    inv = stok.merge(avg_out, on="nama_barang", how="left")
+    inv = stok.merge(avg, on="nama_barang", how="left")
     inv["avg_daily_out"] = inv["avg_daily_out"].fillna(0.1)
     inv["days_cover"] = inv["stok_karton"] / inv["avg_daily_out"]
 
     return inv
 
 
-# =============================
-# PALLET CALCULATION
-# =============================
+# =========================
+# PALLET
+# =========================
 def pallet_calculation(inv, master):
-    master = master.rename(columns={
-        "Nama_Barang": "nama_barang",
-        "Karton_per_Pallet": "karton_per_pallet",
-        "Kategori": "kategori"
-    })
 
-    master = master[
-        ["nama_barang", "kategori", "karton_per_pallet"]
-    ]
+    alias = {
+        "nama_barang": ["Nama_Barang", "Nama Barang"],
+        "kategori": ["Kategori"],
+        "karton_per_pallet": [
+            "Karton_per_Pallet",
+            "Karton per Pallet"
+        ]
+    }
 
-    inv = inv.merge(master, on="nama_barang", how="left")
+    master = auto_map_columns(
+        master,
+        alias,
+        required=["nama_barang", "karton_per_pallet"]
+    )
+
+    master["karton_per_pallet"] = (
+        pd.to_numeric(master["karton_per_pallet"], errors="coerce")
+        .fillna(1)
+    )
+
+    inv = inv.merge(
+        master[["nama_barang", "kategori", "karton_per_pallet"]],
+        on="nama_barang",
+        how="left"
+    )
 
     inv["karton_per_pallet"] = inv["karton_per_pallet"].fillna(1)
     inv["pallet_used"] = inv["stok_karton"] / inv["karton_per_pallet"]
@@ -86,21 +103,37 @@ def pallet_calculation(inv, master):
     return inv
 
 
-# =============================
-# WAREHOUSE UTILIZATION
-# =============================
+# =========================
+# UTILISASI GUDANG
+# =========================
 def warehouse_utilization(inv, kapasitas):
-    kapasitas = kapasitas.rename(columns={
-        "Total_Pallet": "total_pallet"
-    })
 
-    util = (
-        inv.groupby("Gudang", as_index=False)["pallet_used"]
-        .sum()
-        .merge(kapasitas, on="Gudang", how="left")
+    alias = {
+        "gudang": ["Gudang"],
+        "total_pallet": [
+            "Total_Pallet",
+            "Total Pallet",
+            "Capacity"
+        ]
+    }
+
+    kapasitas = auto_map_columns(
+        kapasitas,
+        alias,
+        required=["gudang", "total_pallet"]
     )
 
-    util["total_pallet"] = util["total_pallet"].fillna(1)
+    kapasitas["total_pallet"] = (
+        pd.to_numeric(kapasitas["total_pallet"], errors="coerce")
+        .fillna(1)
+    )
+
+    util = (
+        inv.groupby("gudang", as_index=False)["pallet_used"]
+        .sum()
+        .merge(kapasitas, on="gudang", how="left")
+    )
+
     util["utilisasi_pct"] = util["pallet_used"] / util["total_pallet"] * 100
 
     return util
