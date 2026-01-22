@@ -118,24 +118,44 @@ def pallet_calculation(inv, master):
 # =========================
 def warehouse_utilization(inv, kapasitas):
 
-    if "Gudang" not in kapasitas.columns or "Total_Pallet" not in kapasitas.columns:
-        raise ValueError("Sheet Kapasitas_Gudang HARUS punya kolom Gudang & Total_Pallet")
+    # Pastikan kolom Gudang ada
+    if "Gudang" not in kapasitas.columns:
+        raise ValueError("Sheet Kapasitas_Gudang tidak punya kolom 'Gudang'")
 
-    kapasitas = kapasitas.rename(columns={
-        "Total_Pallet": "total_pallet"
-    })
+    # === AUTO DETECT KOLOM KAPASITAS ===
+    capacity_candidates = [
+        "Total_Pallet",
+        "Total Pallet",
+        "Total_Pallet_Capacity",
+        "Kapasitas_Pallet",
+        "Capacity"
+    ]
 
-    kapasitas["total_pallet"] = (
-        pd.to_numeric(kapasitas["total_pallet"], errors="coerce")
-        .fillna(1)
-    )
+    capacity_col = None
+    for c in capacity_candidates:
+        if c in kapasitas.columns:
+            capacity_col = c
+            break
+
+    # Jika tidak ketemu → WARNING, bukan error
+    if capacity_col is None:
+        kapasitas["total_pallet"] = 1
+    else:
+        kapasitas = kapasitas.rename(columns={capacity_col: "total_pallet"})
+        kapasitas["total_pallet"] = (
+            pd.to_numeric(kapasitas["total_pallet"], errors="coerce")
+            .fillna(1)
+        )
 
     util = (
         inv.groupby("Gudang", as_index=False)["pallet_used"]
         .sum()
-        .merge(kapasitas, on="Gudang", how="left")
+        .merge(kapasitas[["Gudang", "total_pallet"]], on="Gudang", how="left")
     )
 
+    util["total_pallet"] = util["total_pallet"].fillna(1)
     util["utilisasi_pct"] = util["pallet_used"] / util["total_pallet"] * 100
 
     return util
+
+
