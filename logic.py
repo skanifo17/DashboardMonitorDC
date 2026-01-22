@@ -1,41 +1,48 @@
 import pandas as pd
 import numpy as np
-from schema import auto_map_columns
 
-# ======================
-# TRANSAKSI
-# ======================
+# =========================
+# TRANSAKSI (SESUI GSHEET)
+# =========================
 def prepare_transaksi(df):
 
-    alias = {
-        "tanggal": ["Tanggal"],
-        "nama_barang": ["Nama_Barang", "Nama Barang"],
-        "tipe": ["Tipe"],
-        "karton": ["Jumlah_Karton", "Jumlah Karton", "Karton"],
-        "gudang": ["Gudang"]
-    }
+    # VALIDASI WAJIB
+    required_cols = [
+        "Tanggal",
+        "Nama_Barang",
+        "Tipe",
+        "Jumlah_Karton",
+        "Gudang"
+    ]
+    for c in required_cols:
+        if c not in df.columns:
+            raise ValueError(f"Kolom '{c}' tidak ada di Sheet Transaksi")
 
-    df = auto_map_columns(
-        df,
-        alias,
-        required=["tanggal", "nama_barang", "tipe", "karton", "gudang"]
-    )
+    # Rename internal (BIAR RAPI)
+    df = df.rename(columns={
+        "Nama_Barang": "nama_barang",
+        "Jumlah_Karton": "karton"
+    })
 
-    # Bersihkan data
-    df["tanggal"] = pd.to_datetime(
-        df["tanggal"],
+    df = df[["Tanggal", "nama_barang", "Tipe", "karton", "Gudang"]]
+
+    # Parse tanggal (ANTI ERROR)
+    df["Tanggal"] = pd.to_datetime(
+        df["Tanggal"],
         errors="coerce",
         dayfirst=True
     )
-    df = df.dropna(subset=["tanggal"])
+    df = df.dropna(subset=["Tanggal"])
 
+    # Pastikan numerik
     df["karton"] = pd.to_numeric(df["karton"], errors="coerce").fillna(0)
-    df["tipe"] = df["tipe"].astype(str).str.upper().str.strip()
-    df["gudang"] = df["gudang"].astype(str).str.strip()
 
-    # Qty logic
+    # Normalisasi tipe
+    df["Tipe"] = df["Tipe"].astype(str).str.upper().str.strip()
+
+    # LOGIC STOK
     df["qty"] = np.where(
-        df["tipe"].str.contains("OUT"),
+        df["Tipe"] == "OUTBOUND",
         -df["karton"],
         df["karton"]
     )
@@ -43,52 +50,54 @@ def prepare_transaksi(df):
     return df
 
 
-# ======================
-# INVENTORY
-# ======================
+# =========================
+# INVENTORY POSITION
+# =========================
 def inventory_position(df):
 
-    if df.empty:
-        return pd.DataFrame(
-            columns=["nama_barang", "gudang", "stok_karton", "avg_daily_out", "days_cover"]
-        )
-
     stok = (
-        df.groupby(["nama_barang", "gudang"], as_index=False)["qty"]
+        df.groupby(["nama_barang", "Gudang"], as_index=False)["qty"]
         .sum()
         .rename(columns={"qty": "stok_karton"})
     )
 
-    outbound = df[df["tipe"].str.contains("OUT")]
+    outbound = df[df["Tipe"] == "OUTBOUND"]
 
-    avg = (
+    avg_out = (
         outbound.groupby("nama_barang", as_index=False)["karton"]
         .mean()
         .rename(columns={"karton": "avg_daily_out"})
     )
 
-    inv = stok.merge(avg, on="nama_barang", how="left")
+    inv = stok.merge(avg_out, on="nama_barang", how="left")
     inv["avg_daily_out"] = inv["avg_daily_out"].fillna(0.1)
     inv["days_cover"] = inv["stok_karton"] / inv["avg_daily_out"]
 
     return inv
 
 
-# ======================
+# =========================
 # PALLET
-# ======================
+# =========================
 def pallet_calculation(inv, master):
 
-    alias = {
-        "nama_barang": ["Nama_Barang", "Nama Barang"],
-        "kategori": ["Kategori"],
-        "karton_per_pallet": ["Karton_per_Pallet", "Karton per Pallet"]
-    }
+    required_cols = [
+        "Nama_Barang",
+        "Kategori",
+        "Karton_per_Pallet"
+    ]
+    for c in required_cols:
+        if c not in master.columns:
+            raise ValueError(f"Kolom '{c}' tidak ada di Master_Barang")
 
-    master = auto_map_columns(master, alias)
+    master = master.rename(columns={
+        "Nama_Barang": "nama_barang",
+        "Karton_per_Pallet": "karton_per_pallet",
+        "Kategori": "kategori"
+    })
 
     master["karton_per_pallet"] = (
-        pd.to_numeric(master.get("karton_per_pallet"), errors="coerce")
+        pd.to_numeric(master["karton_per_pallet"], errors="coerce")
         .fillna(1)
     )
 
@@ -104,27 +113,27 @@ def pallet_calculation(inv, master):
     return inv
 
 
-# ======================
+# =========================
 # UTILISASI GUDANG
-# ======================
+# =========================
 def warehouse_utilization(inv, kapasitas):
 
-    alias = {
-        "gudang": ["Gudang"],
-        "total_pallet": ["Total_Pallet", "Total Pallet"]
-    }
+    if "Gudang" not in kapasitas.columns or "Total_Pallet" not in kapasitas.columns:
+        raise ValueError("Sheet Kapasitas_Gudang HARUS punya kolom Gudang & Total_Pallet")
 
-    kapasitas = auto_map_columns(kapasitas, alias)
+    kapasitas = kapasitas.rename(columns={
+        "Total_Pallet": "total_pallet"
+    })
 
     kapasitas["total_pallet"] = (
-        pd.to_numeric(kapasitas.get("total_pallet"), errors="coerce")
+        pd.to_numeric(kapasitas["total_pallet"], errors="coerce")
         .fillna(1)
     )
 
     util = (
-        inv.groupby("gudang", as_index=False)["pallet_used"]
+        inv.groupby("Gudang", as_index=False)["pallet_used"]
         .sum()
-        .merge(kapasitas, on="gudang", how="left")
+        .merge(kapasitas, on="Gudang", how="left")
     )
 
     util["utilisasi_pct"] = util["pallet_used"] / util["total_pallet"] * 100
