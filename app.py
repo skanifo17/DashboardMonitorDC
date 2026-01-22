@@ -24,7 +24,7 @@ with st.sidebar:
 master = load_sheet("Master_Barang")
 trans = prepare_transaksi(load_sheet("Transaksi"))
 invoice = load_sheet("Invoice")
-kapasitas = load_sheet("Kapasitas Gudang")
+kapasitas = load_sheet("Kapasitas_Gudang")
 
 # FILTER
 with st.sidebar:
@@ -105,5 +105,6 @@ Gudang: {r['Gudang']}
 DOC: {round(r['Days Cover'],1)} hari"""
     )
     trans = prepare_transaksi(load_sheet("Transaksi"))
+
 
 
