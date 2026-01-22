@@ -2,18 +2,17 @@ import pandas as pd
 import numpy as np
 from schema import auto_map_columns
 
-# =========================
+# ======================
 # TRANSAKSI
-# =========================
+# ======================
 def prepare_transaksi(df):
 
     alias = {
-        "tanggal": ["Tanggal", "Date"],
-        "sku": ["SKU"],
+        "tanggal": ["Tanggal"],
         "nama_barang": ["Nama_Barang", "Nama Barang"],
-        "tipe": ["Tipe", "Type"],
+        "tipe": ["Tipe"],
         "karton": ["Jumlah_Karton", "Jumlah Karton", "Karton"],
-        "gudang": ["Gudang", "Warehouse"]
+        "gudang": ["Gudang"]
     }
 
     df = auto_map_columns(
@@ -22,6 +21,7 @@ def prepare_transaksi(df):
         required=["tanggal", "nama_barang", "tipe", "karton", "gudang"]
     )
 
+    # Bersihkan data
     df["tanggal"] = pd.to_datetime(
         df["tanggal"],
         errors="coerce",
@@ -31,7 +31,9 @@ def prepare_transaksi(df):
 
     df["karton"] = pd.to_numeric(df["karton"], errors="coerce").fillna(0)
     df["tipe"] = df["tipe"].astype(str).str.upper().str.strip()
+    df["gudang"] = df["gudang"].astype(str).str.strip()
 
+    # Qty logic
     df["qty"] = np.where(
         df["tipe"].str.contains("OUT"),
         -df["karton"],
@@ -41,10 +43,16 @@ def prepare_transaksi(df):
     return df
 
 
-# =========================
+# ======================
 # INVENTORY
-# =========================
+# ======================
 def inventory_position(df):
+
+    if df.empty:
+        return pd.DataFrame(
+            columns=["nama_barang", "gudang", "stok_karton", "avg_daily_out", "days_cover"]
+        )
+
     stok = (
         df.groupby(["nama_barang", "gudang"], as_index=False)["qty"]
         .sum()
@@ -66,28 +74,21 @@ def inventory_position(df):
     return inv
 
 
-# =========================
+# ======================
 # PALLET
-# =========================
+# ======================
 def pallet_calculation(inv, master):
 
     alias = {
         "nama_barang": ["Nama_Barang", "Nama Barang"],
         "kategori": ["Kategori"],
-        "karton_per_pallet": [
-            "Karton_per_Pallet",
-            "Karton per Pallet"
-        ]
+        "karton_per_pallet": ["Karton_per_Pallet", "Karton per Pallet"]
     }
 
-    master = auto_map_columns(
-        master,
-        alias,
-        required=["nama_barang", "karton_per_pallet"]
-    )
+    master = auto_map_columns(master, alias)
 
     master["karton_per_pallet"] = (
-        pd.to_numeric(master["karton_per_pallet"], errors="coerce")
+        pd.to_numeric(master.get("karton_per_pallet"), errors="coerce")
         .fillna(1)
     )
 
@@ -103,28 +104,20 @@ def pallet_calculation(inv, master):
     return inv
 
 
-# =========================
+# ======================
 # UTILISASI GUDANG
-# =========================
+# ======================
 def warehouse_utilization(inv, kapasitas):
 
     alias = {
         "gudang": ["Gudang"],
-        "total_pallet": [
-            "Total_Pallet",
-            "Total Pallet",
-            "Capacity"
-        ]
+        "total_pallet": ["Total_Pallet", "Total Pallet"]
     }
 
-    kapasitas = auto_map_columns(
-        kapasitas,
-        alias,
-        required=["gudang", "total_pallet"]
-    )
+    kapasitas = auto_map_columns(kapasitas, alias)
 
     kapasitas["total_pallet"] = (
-        pd.to_numeric(kapasitas["total_pallet"], errors="coerce")
+        pd.to_numeric(kapasitas.get("total_pallet"), errors="coerce")
         .fillna(1)
     )
 
