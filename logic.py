@@ -1,40 +1,37 @@
 import pandas as pd
 import numpy as np
-from config import LEAD_TIME
 
-def normalize_columns(df):
-    df.columns = (
-        df.columns
-        .str.strip()
-        .str.lower()
-        .str.replace(" ", "_")
-    )
-    return df
-
-
+# =============================
+# TRANSAKSI
+# =============================
 def prepare_transaksi(df):
-    df = normalize_columns(df)
-
+    # Rename agar konsisten
     df = df.rename(columns={
-        "nama_barang": "nama_barang",
-        "jumlah_karton": "karton"
+        "Nama_Barang": "nama_barang",
+        "Jumlah_Karton": "karton"
     })
 
-    required = ["tanggal", "nama_barang", "tipe", "karton", "gudang"]
-    df = df[required]
+    df = df[
+        ["Tanggal", "SKU", "nama_barang", "Tipe", "karton", "Gudang"]
+    ]
 
-    df["tanggal"] = pd.to_datetime(
-        df["tanggal"],
+    # Tanggal aman
+    df["Tanggal"] = pd.to_datetime(
+        df["Tanggal"],
         errors="coerce",
         dayfirst=True
     )
-    df = df.dropna(subset=["tanggal"])
+    df = df.dropna(subset=["Tanggal"])
 
+    # Karton numerik
     df["karton"] = pd.to_numeric(df["karton"], errors="coerce").fillna(0)
-    df["tipe"] = df["tipe"].astype(str).str.upper().str.strip()
 
+    # Normalisasi tipe
+    df["Tipe"] = df["Tipe"].astype(str).str.upper().str.strip()
+
+    # Qty logic
     df["qty"] = np.where(
-        df["tipe"].str.contains("OUT"),
+        df["Tipe"] == "OUTBOUND",
         -df["karton"],
         df["karton"]
     )
@@ -42,39 +39,44 @@ def prepare_transaksi(df):
     return df
 
 
+# =============================
+# INVENTORY POSITION
+# =============================
 def inventory_position(df):
-    stock = (
-        df.groupby(["nama_barang", "gudang"], as_index=False)["qty"]
+    stok = (
+        df.groupby(["nama_barang", "Gudang"], as_index=False)["qty"]
         .sum()
         .rename(columns={"qty": "stok_karton"})
     )
 
-    outbound = df[df["tipe"].str.contains("OUT")]
+    outbound = df[df["Tipe"] == "OUTBOUND"]
+
     avg_out = (
         outbound.groupby("nama_barang", as_index=False)["karton"]
         .mean()
         .rename(columns={"karton": "avg_daily_out"})
     )
 
-    inv = stock.merge(avg_out, on="nama_barang", how="left")
+    inv = stok.merge(avg_out, on="nama_barang", how="left")
     inv["avg_daily_out"] = inv["avg_daily_out"].fillna(0.1)
     inv["days_cover"] = inv["stok_karton"] / inv["avg_daily_out"]
 
     return inv
 
 
+# =============================
+# PALLET CALCULATION
+# =============================
 def pallet_calculation(inv, master):
-    master = normalize_columns(master)
-
-    # rename agar konsisten
     master = master.rename(columns={
-        "nama_barang": "nama_barang",
-        "kategori": "kategori",
-        "karton_per_pallet": "karton_per_pallet"
+        "Nama_Barang": "nama_barang",
+        "Karton_per_Pallet": "karton_per_pallet",
+        "Kategori": "kategori"
     })
 
-    required = ["nama_barang", "kategori", "karton_per_pallet"]
-    master = master[required]
+    master = master[
+        ["nama_barang", "kategori", "karton_per_pallet"]
+    ]
 
     inv = inv.merge(master, on="nama_barang", how="left")
 
@@ -84,21 +86,21 @@ def pallet_calculation(inv, master):
     return inv
 
 
+# =============================
+# WAREHOUSE UTILIZATION
+# =============================
 def warehouse_utilization(inv, kapasitas):
-    kapasitas = normalize_columns(kapasitas)
     kapasitas = kapasitas.rename(columns={
-        "total_pallet_capacity": "total_pallet_capacity"
+        "Total_Pallet": "total_pallet"
     })
 
     util = (
-        inv.groupby("gudang", as_index=False)["pallet_used"]
+        inv.groupby("Gudang", as_index=False)["pallet_used"]
         .sum()
-        .merge(kapasitas, on="gudang", how="left")
+        .merge(kapasitas, on="Gudang", how="left")
     )
 
-    util["total_pallet_capacity"] = util["total_pallet_capacity"].fillna(1)
-    util["utilisasi_%"] = (
-        util["pallet_used"] / util["total_pallet_capacity"] * 100
-    )
+    util["total_pallet"] = util["total_pallet"].fillna(1)
+    util["utilisasi_pct"] = util["pallet_used"] / util["total_pallet"] * 100
 
     return util
