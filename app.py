@@ -104,3 +104,6 @@ Barang: {r['Nama Barang']}
 Gudang: {r['Gudang']}
 DOC: {round(r['Days Cover'],1)} hari"""
     )
+    trans = prepare_transaksi(load_sheet("Transaksi"))
+
+
