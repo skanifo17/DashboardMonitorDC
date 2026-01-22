@@ -1,5 +1,6 @@
 import streamlit as st
 from gsheet import load_sheet
+from schema import auto_map_columns
 from logic import *
 from charts import *
 from forecast import forecast_item
@@ -105,6 +106,7 @@ Gudang: {r['Gudang']}
 DOC: {round(r['Days Cover'],1)} hari"""
     )
     trans = prepare_transaksi(load_sheet("Transaksi"))
+
 
 
 
